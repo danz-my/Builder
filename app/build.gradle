@@ -14,11 +14,29 @@ android {
         versionName "1.0"
     }
 
+    // Kunci sign release DIAMBIL DARI ENV VAR (diisi CI dari GitHub
+    // Secrets — lihat .github/workflows/build.yml). Kalau env var kosong
+    // (misal build lokal tanpa keystore), otomatis fallback ke debug key
+    // biar tetap bisa build, TAPI APK-nya nggak akan bisa "update install"
+    // menimpa APK release resmi (beda kunci).
+    def hasReleaseKeystore = System.getenv("ZERUSOFT_KEYSTORE_PATH") != null
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile file(System.getenv("ZERUSOFT_KEYSTORE_PATH"))
+                storePassword System.getenv("ZERUSOFT_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ZERUSOFT_KEY_ALIAS")
+                keyPassword System.getenv("ZERUSOFT_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug { debuggable true }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
     }
 
