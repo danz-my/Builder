@@ -41,8 +41,28 @@ jobs:
           sed -i "s/versionCode [0-9]*/versionCode ${{ github.event.inputs.version_code }}/" app/build.gradle
           sed -i 's/versionName "[^"]*"/versionName "${{ github.event.inputs.version_name }}"/' app/build.gradle
 
+      - name: 🔑 Decode Release Keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ZERUSOFT_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "${{ github.workspace }}/zerusoft-release.jks"
+            echo "✅ Keystore decoded — release APK akan di-sign konsisten"
+          else
+            echo "⚠️ Secret ZERUSOFT_KEYSTORE_B64 belum diset — release APK fallback ke debug key (TIDAK bisa update-install)"
+          fi
+
       - name: 🔨 Build APK
-        run: ./gradlew assembleDebug assembleRelease --no-daemon
+        env:
+          ZERUSOFT_KEYSTORE_PATH: ${{ github.workspace }}/zerusoft-release.jks
+          ZERUSOFT_KEYSTORE_PASSWORD: ${{ secrets.ZERUSOFT_KEYSTORE_PASSWORD }}
+          ZERUSOFT_KEY_ALIAS: ${{ secrets.ZERUSOFT_KEY_ALIAS }}
+          ZERUSOFT_KEY_PASSWORD: ${{ secrets.ZERUSOFT_KEY_PASSWORD }}
+        run: |
+          if [ ! -f "$ZERUSOFT_KEYSTORE_PATH" ]; then
+            unset ZERUSOFT_KEYSTORE_PATH
+          fi
+          ./gradlew assembleDebug assembleRelease --no-daemon
 
       - name: 📛 Rename APK
         run: |
