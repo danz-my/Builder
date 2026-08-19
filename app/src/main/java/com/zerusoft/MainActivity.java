@@ -33,8 +33,14 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
     private ProgressBar progressBar;
+    private RelativeLayout rootLayout;
     private static final int FILE_CHOOSER_REQUEST = 1;
     private ValueCallback<Uri[]> filePathCallback;
+
+    // ---- State buat HTML5 Fullscreen API (video/iframe fullscreen) ----
+    private View fullscreenCustomView;
+    private WebChromeClient.CustomViewCallback fullscreenCallback;
+    private int savedSystemUiVisibility;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -46,8 +52,8 @@ public class MainActivity extends AppCompatActivity {
         window.setStatusBarColor(0xFF0A0A0F);
         window.setNavigationBarColor(0xFF0A0A0F);
 
-        RelativeLayout layout = new RelativeLayout(this);
-        layout.setLayoutParams(new RelativeLayout.LayoutParams(
+        rootLayout = new RelativeLayout(this);
+        rootLayout.setLayoutParams(new RelativeLayout.LayoutParams(
             RelativeLayout.LayoutParams.MATCH_PARENT,
             RelativeLayout.LayoutParams.MATCH_PARENT));
 
@@ -63,12 +69,12 @@ public class MainActivity extends AppCompatActivity {
             RelativeLayout.LayoutParams.MATCH_PARENT,
             RelativeLayout.LayoutParams.MATCH_PARENT));
 
-        layout.addView(webView);
-        layout.addView(progressBar);
-        setContentView(layout);
+        rootLayout.addView(webView);
+        rootLayout.addView(progressBar);
+        setContentView(rootLayout);
 
         // Beri padding agar konten tidak tertimpa status bar & navbar
-        ViewCompat.setOnApplyWindowInsetsListener(layout, (v, insets) -> {
+        ViewCompat.setOnApplyWindowInsetsListener(rootLayout, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             return WindowInsetsCompat.CONSUMED;
@@ -83,6 +89,7 @@ public class MainActivity extends AppCompatActivity {
         s.setAllowFileAccess(true);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        s.setMediaPlaybackRequiresUserGesture(false);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -114,9 +121,63 @@ public class MainActivity extends AppCompatActivity {
                 startActivityForResult(p.createIntent(), FILE_CHOOSER_REQUEST);
                 return true;
             }
+
+            // ---- Ini yang bikin fullscreen (dari video ATAU dari
+            // requestFullscreen() manapun di halaman web) beneran jalan
+            // di dalam WebView. Tanpa 2 method di bawah ini, permintaan
+            // fullscreen dari JavaScript nggak direspons sama sekali. ----
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback callback) {
+                if (fullscreenCustomView != null) {
+                    // udah ada view fullscreen lain yang aktif, tolak yang baru
+                    callback.onCustomViewHidden();
+                    return;
+                }
+                fullscreenCustomView = view;
+                fullscreenCallback = callback;
+
+                webView.setVisibility(View.GONE);
+                rootLayout.addView(fullscreenCustomView, new RelativeLayout.LayoutParams(
+                    RelativeLayout.LayoutParams.MATCH_PARENT,
+                    RelativeLayout.LayoutParams.MATCH_PARENT));
+
+                savedSystemUiVisibility = getWindow().getDecorView().getSystemUiVisibility();
+                setImmersiveFullscreen(true);
+            }
+
+            @Override
+            public void onHideCustomView() {
+                if (fullscreenCustomView == null) return;
+
+                webView.setVisibility(View.VISIBLE);
+                rootLayout.removeView(fullscreenCustomView);
+                fullscreenCustomView = null;
+
+                if (fullscreenCallback != null) {
+                    fullscreenCallback.onCustomViewHidden();
+                    fullscreenCallback = null;
+                }
+
+                setImmersiveFullscreen(false);
+                getWindow().getDecorView().setSystemUiVisibility(savedSystemUiVisibility);
+            }
         });
 
         webView.loadUrl(APP_URL);
+    }
+
+    /** Sembunyiin/tampilin status bar & navigation bar pas mode fullscreen. */
+    private void setImmersiveFullscreen(boolean enable) {
+        if (enable) {
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            );
+        }
     }
 
     @Override
@@ -132,9 +193,21 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
-            webView.goBack();
-            return true;
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            // Kalau lagi fullscreen, tombol back keluar dari fullscreen
+            // dulu (bukan langsung nutup app/balik halaman).
+            if (fullscreenCustomView != null) {
+                if (fullscreenCallback != null) {
+                    fullscreenCallback.onCustomViewHidden();
+                } else {
+                    webView.getWebChromeClient().onHideCustomView();
+                }
+                return true;
+            }
+            if (webView.canGoBack()) {
+                webView.goBack();
+                return true;
+            }
         }
         return super.onKeyDown(keyCode, event);
     }
